@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NodeHub</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+
+<!-- ═══ EXTERNAL DATA FILES ═══ -->
+<script src="data/config.js"></script>
+<script>
+// Mỗi data file khai báo `const DATA_DEFAULT`.
+// Nếu load bằng <script src> liên tiếp sẽ lỗi "already declared" (const không redeclare được).
+// Fix: fetch từng file rồi chạy trong Function scope riêng biệt.
+window._ENGINES = {};
+window._TIPS = [];
+
+async function loadEngines() {
+  const files = [
+    { key: 'amplify', src: 'data/node_ase.js' },
+    { key: 'unity',   src: 'data/node_usg.js' },
+    { key: 'unreal',  src: 'data/node_umg.js' },
+  ];
+  for (const f of files) {
+    try {
+      const res = await fetch(f.src);
+      const code = await res.text();
+      // Chạy trong Function scope riêng → const không conflict
+      const fn = new Function(code + '\nreturn DATA_DEFAULT;');
+      window._ENGINES[f.key] = fn();
+    } catch(e) {
+      console.warn('Could not load', f.src, e);
+      window._ENGINES[f.key] = [];
+    }
+  }
+  // Load tips data
+  try {
+    const res = await fetch('data/tips.js');
+    const code = await res.text();
+    const fn = new Function(code + '\nreturn DATA_TIPS;');
+    window._TIPS = fn();
+  } catch(e) {
+    console.warn('Could not load tips.js', e);
+    window._TIPS = [];
+  }
+  // Load terms data
+  try {
+    const resTerm = await fetch('data/terms.js');
+    const codeTerm = await resTerm.text();
+    new Function(codeTerm)(); // sets window.TERMS
+  } catch(e) {
+    console.warn('Could not load terms.js', e);
+    window.TERMS = [];
+  }
+  initApp(); // khởi động app sau khi tất cả data đã load
+}
+loadEngines();
+</script>
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <button id="hamburger" title="Cấu hình" aria-label="Cấu hình">
+    <svg id="hbg-bars" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none">
+      <line x1="2" y1="4"  x2="16" y2="4"/>
+      <line x1="2" y1="9"  x2="16" y2="9"/>
+      <line x1="2" y1="14" x2="16" y2="14"/>
+    </svg>
+    <svg id="hbg-x" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none">
+      <line x1="3" y1="3" x2="15" y2="15"/>
+      <line x1="15" y1="3" x2="3" y2="15"/>
+    </svg>
+    <svg id="hbg-3" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="transform:rotate(90deg)">
+      <line x1="2" y1="4"  x2="16" y2="4"/>
+      <line x1="2" y1="9"  x2="16" y2="9"/>
+      <line x1="2" y1="14" x2="16" y2="14"/>
+    </svg>
+  </button>
+
+  <div class="engine-tabs" id="engine-tabs">
+    <button class="engine-tab" data-eng="unity"   title="Unity Shader Graph">USG</button>
+    <button class="engine-tab" data-eng="unreal"  title="Unreal Material Graph">UMG</button>
+    <button class="engine-tab" data-eng="amplify" title="Amplify Shader Editor">ASE</button>
+  </div>
+
+  <div class="search-wrap">
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input type="text" id="search" placeholder="Tìm tất cả node…" autocomplete="off" spellcheck="false">
+  </div>
+  <a href="editor.html" id="editor-link" title="Mở Editor" aria-label="Mở Editor">
+    <svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+  </a>
+
+</header>
+
+<div class="app">
+  <nav class="sidebar collapsed" id="sidebar"></nav>
+  <main class="main" id="main"></main>
+</div>
+
+<!-- edit modal removed - managed at /editor -->
+
+<script>
+/* ══════════════════════════════════════════════════════
+   APP STATE
+══════════════════════════════════════════════════════ */
+const ENGINES = window._ENGINES;
+
+const state = {
+  engine: 'amplify',   // engine hiện tại (cho sidebar/group view)
+  activeEngine: null,  // null = chưa chọn engine (search all), string = đang ở engine đó
+  groupId: null,
+  search: '',
+  editMode: false, // always false on main page
+  splash: true,
+};
+
+// Home page config — persist in localStorage
+const HOME_CONFIG_KEY = 'nodehub_home_config';
+function loadHomeConfig() {
+  try {
+    const saved = localStorage.getItem(HOME_CONFIG_KEY);
+    if (saved) return JSON.parse(saved);
+  } catch(e) {}
+  return { showNode: true, showTerm: true, showTips: true };
+}
+function saveHomeConfig(cfg) {
+  try { localStorage.setItem(HOME_CONFIG_KEY, JSON.stringify(cfg)); } catch(e) {}
+}
+let homeConfig = loadHomeConfig();
+
+// Convenience: data for current engine
+function data() { return ENGINES[state.engine] || []; }
+function group() { return data().find(g => g.id === state.groupId) || data()[0] || null; }
+
+/* ══════════════════════════════════════════════════════
+   RENDER SIDEBAR
+══════════════════════════════════════════════════════ */
+function renderSidebar() {
+  const sb = document.getElementById('sidebar');
+  sb.innerHTML = '';
+  data().forEach(g => {
+    const btn = document.createElement('button');
+    btn.className = `group-btn cls-${g.cls}` + (g.id === state.groupId ? ' active' : '');
+    btn.innerHTML = `
+      <span class="g-ico">${g.ico}</span>
+      <span class="g-label">${g.label}</span>
+      <span class="g-count">${g.nodes.length}</span>
+    `;
+    btn.addEventListener('click', () => {
+      state.groupId = g.id;
+      state.search = '';
+      state.splash = false;
+      document.getElementById('search').value = '';
+      renderSidebar();
+      renderMain();
+    });
+    sb.appendChild(btn);
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   RENDER MAIN
+══════════════════════════════════════════════════════ */
+function renderMain() {
+  const main = document.getElementById('main');
+  const q = state.search.trim().toLowerCase();
+
+  if (q) {
+    renderSearch(main, q);
+  } else if (state.splash) {
+    renderSplash();
+  } else {
+    renderGroup(main);
+  }
+}
+
+function renderGroup(main) {
+  const g = group();
+  if (!g) { main.innerHTML = '<div class="empty"><span>◈</span>Không có dữ liệu.</div>'; return; }
+
+  main.innerHTML = `
+    <div class="group-header cls-${g.cls}">
+      <div class="g-ico-big">${g.ico}</div>
+      <div>
+        <div class="group-title">${g.label}</div>
+        <div class="group-desc">${g.desc || ''}</div>
+      </div>
+    </div>
+    <div class="node-grid" id="node-grid"></div>
+  `;
+
+  const grid = document.getElementById('node-grid');
+  g.nodes.forEach(n => grid.appendChild(buildCard(n, g)));
+}
+
+const ENG_LABELS = { amplify: 'Amplify Shader Editor', unity: 'Unity Shader Graph', unreal: 'Unreal Material Graph' };
+const ENG_SHORT  = { amplify: 'ASE', unity: 'USG', unreal: 'UMG' };
+const TAG_LABELS = { ue5:'UE5+', u2022:'2022+', u2023:'2023+', urp:'URP', hdrp:'HDRP'};
+
+function renderSearch(main, q) {
+  // Nếu chưa chọn engine → tìm trên cả 3; nếu đã chọn → tìm engine đó
+  const engsToSearch = state.activeEngine
+    ? [state.activeEngine]
+    : Object.keys(window._ENGINES);
+
+  const sections = []; // [{eng, group, nodes}]
+  engsToSearch.forEach(eng => {
+    (window._ENGINES[eng] || []).forEach(g => {
+      const hits = g.nodes.filter(n =>
+        n.n.toLowerCase().includes(q) ||
+        (n.f && n.f.toLowerCase().includes(q)) ||
+        (n.sc && n.sc.toLowerCase().includes(q))
+      );
+      if (hits.length) sections.push({ eng, group: g, nodes: hits });
+    });
+  });
+
+  if (!sections.length) {
+    main.innerHTML = `<div class="empty"><span>∅</span>Không tìm thấy "<b>${q}</b>"</div>`;
+    return;
+  }
+
+  main.innerHTML = '';
+  // Group by engine for visual separation
+  const byEng = {};
+  sections.forEach(s => {
+    if (!byEng[s.eng]) byEng[s.eng] = [];
+    byEng[s.eng].push(s);
+  });
+
+  Object.entries(byEng).forEach(([eng, secs]) => {
+    // Engine section header (only when searching all engines)
+    if (!state.activeEngine) {
+      const engHeader = document.createElement('div');
+      engHeader.className = 'search-group-title';
+      const total = secs.reduce((a,s) => a + s.nodes.length, 0);
+      engHeader.innerHTML = `<span class="eng-label-${eng}">${ENG_SHORT[eng]}</span> — ${total} kết quả`;
+      main.appendChild(engHeader);
+    }
+
+    secs.forEach(({ group: g, nodes }) => {
+      const subTitle = document.createElement('div');
+      subTitle.className = 'search-group-title';
+      subTitle.style.fontSize = '10px';
+      subTitle.style.opacity = '0.7';
+      subTitle.style.marginTop = '4px';
+      subTitle.textContent = `${g.ico}  ${g.label}  (${nodes.length})`;
+      main.appendChild(subTitle);
+
+      const grid = document.createElement('div');
+      grid.className = `node-grid eng-${eng}`;
+      nodes.forEach(n => grid.appendChild(buildCard(n, g)));
+      main.appendChild(grid);
+    });
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   BUILD NODE CARD
+══════════════════════════════════════════════════════ */
+function buildCard(n, g, { autoExpand = false } = {}) {
+  const card = document.createElement('div');
+  card.className = `node-card cls-${g.cls}`;
+
+  const params = (n.p && n.p.length)
+    ? `<div class="node-params">${n.p.map(([k,v]) =>
+        `<div class="param-row"><span class="param-name">${k}</span><span class="param-desc">${v}</span></div>`
+      ).join('')}</div>`
+    : '';
+
+  const editBtn = state.editMode
+    ? `<button class="edit-card-btn" data-nid="${n.n}" data-gid="${g.id}" title="Sửa node" style="margin-left:auto;background:transparent;border:none;color:var(--accent2);cursor:pointer;font-size:13px;">✎</button>`
+    : '';
+
+  // ── Parse nội dung ──
+  // Tags: từ n.tags[] (mới) hoặc fallback extract inline <span class="tag"> (legacy)
+  const nodeTagsArr = (n.tags && n.tags.length)
+    ? n.tags
+    : (() => { const re = /<span class="tag ([^"]+)">[^<]*<\/span>/g; const t=[]; let m; while((m=re.exec(n.f||''))!==null) if(!t.includes(m[1])) t.push(m[1]); return t; })();
+  // Strip legacy inline tag spans from func text
+  const funcHtml = (n.f || '').replace(/<span class="tag [^"]*">[^<]*<\/span>/g, '').trim();
+
+  // Render tag badges
+  const tagsBadge = nodeTagsArr.length
+    ? `<span class="node-tags">${nodeTagsArr.map(t => `<span class="tag ${t}">${TAG_LABELS[t]||t.toUpperCase()}</span>`).join('')}</span>`
+    : '';
+
+  const catBadge = n.cat
+    ? `<span class="node-cat">${n.cat}</span>`
+    : '';
+
+  let scBadge = '';
+  if (n.sc) {
+    const keys = n.sc.split('+').map(k => k.trim()).filter(Boolean);
+    const kbds = keys.map(k => `<kbd>${k}</kbd>`).join('<span class="sc-plus">+</span>');
+    scBadge = `<span class="node-shortcut">${kbds}</span>`;
+  }
+
+  card.innerHTML = `
+    <div class="node-head">
+      <div class="node-dot"></div>
+      <span class="node-name">${n.n}</span>
+      ${catBadge}
+      ${editBtn}
+    </div>
+    <div class="node-body">
+      ${tagsBadge}
+      <div class="node-func">${funcHtml}</div>
+      ${scBadge}
+      ${params}
+    </div>
+  `;
+
+  let pinned = false;
+  if (autoExpand) card.classList.add('expanded');
+  card.addEventListener('mouseenter', () => { if (!pinned) card.classList.add('expanded'); });
+  card.addEventListener('mouseleave', () => { if (!pinned && !autoExpand) card.classList.remove('expanded'); });
+  card.addEventListener('click', e => {
+    if (e.target.closest('.edit-card-btn')) return;
+    if (!pinned) {
+      pinned = true;
+      card.classList.add('expanded', 'pinned');
+    } else {
+      pinned = false;
+      card.classList.remove('expanded', 'pinned');
+    }
+  });
+
+  if (state.editMode) {
+    card.querySelector('.edit-card-btn')?.addEventListener('click', e => {
+      e.stopPropagation();
+      openEditModal(n, g);
+    });
+  }
+
+  return card;
+}
+
+/* ══════════════════════════════════════════════════════
+   ENGINE TABS
+══════════════════════════════════════════════════════ */
+// Hash <-> engine key mapping
+const HASH_TO_ENG = { ase: 'amplify', usg: 'unity', umg: 'unreal' };
+const ENG_TO_HASH = { amplify: 'ase', unity: 'usg', unreal: 'umg' };
+
+function activateEngine(eng) {
+  document.querySelectorAll('.engine-tab').forEach(t => t.classList.remove('active'));
+  const tab = document.querySelector(`.engine-tab[data-eng="${eng}"]`);
+  if (tab) tab.classList.add('active');
+  state.activeEngine = eng;
+  state.engine = eng;
+  state.groupId = data()[0]?.id || null;
+  state.splash = false;
+  state.search = '';
+  const se = document.getElementById('search');
+  se.value = '';
+  se.placeholder = `Tìm trong ${ENG_LABELS[eng]}…`;
+  sidebar.classList.remove('collapsed');
+  hamburger.style.visibility = '';
+  setHamburgerIcon(false);
+  history.replaceState(null, '', '#' + ENG_TO_HASH[eng]);
+  renderSidebar();
+  renderMain();
+}
+
+document.getElementById('engine-tabs').addEventListener('click', e => {
+  const tab = e.target.closest('.engine-tab');
+  if (!tab) return;
+  const eng = tab.dataset.eng;
+  if (state.activeEngine === eng) {
+    resetToHome();
+    return;
+  }
+  activateEngine(eng);
+});
+
+/* ══════════════════════════════════════════════════════
+   SEARCH
+══════════════════════════════════════════════════════ */
+const searchEl = document.getElementById('search');
+let searchTimeout;
+searchEl.addEventListener('input', () => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    state.search = searchEl.value;
+    // Khi xóa hết search → về splash (nếu không có engine active) hoặc về group
+    if (!state.search.trim() && !state.activeEngine) state.splash = true;
+    else state.splash = false;
+    renderMain();
+  }, 160);
+});
+
+/* ══════════════════════════════════════════════════════
+   EDIT MODE — moved to /editor page
+══════════════════════════════════════════════════════ */
+// Edit mode disabled on main page
+
+/* ══════════════════════════════════════════════════════
+   INLINE EDIT MODAL — moved to /editor
+══════════════════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════════════════
+   HAMBURGER
+══════════════════════════════════════════════════════ */
+const hamburger = document.getElementById('hamburger');
+const sidebar   = document.getElementById('sidebar');
+
+function resetToHome() {
+  state.activeEngine = null;
+  state.engine = 'amplify';
+  state.groupId = null;
+  state.search = '';
+  state.splash = true;
+  const se = document.getElementById('search');
+  se.value = '';
+  se.placeholder = 'Tìm tất cả node…';
+  document.querySelectorAll('.engine-tab').forEach(t => t.classList.remove('active'));
+  sidebar.classList.add('collapsed');
+  history.replaceState(null, '', location.pathname + location.search);
+  setHamburger3Mode();
+  renderSidebar();
+  renderSplash();
+}
+
+function setHamburgerIcon(isX) {
+  document.getElementById('hbg-bars').style.display = isX ? 'none' : 'block';
+  document.getElementById('hbg-x').style.display   = isX ? 'block' : 'none';
+  document.getElementById('hbg-3').style.display   = 'none';
+  hamburger.title = isX ? 'Ẩn sidebar' : 'Hiện sidebar';
+  hamburger.setAttribute('aria-label', hamburger.title);
+}
+
+function setHamburger3Mode() {
+  document.getElementById('hbg-bars').style.display = 'none';
+  document.getElementById('hbg-x').style.display   = 'none';
+  document.getElementById('hbg-3').style.display   = 'inline';
+  hamburger.title = 'Cấu hình';
+  hamburger.setAttribute('aria-label', 'Cấu hình');
+}
+
+hamburger.addEventListener('click', () => {
+  if (!state.activeEngine) { openHomeConfigModal(); return; } // Mở cấu hình trang chủ khi ở 3-mode
+
+  // Bật/tắt sidebar bình thường
+  if (sidebar.classList.contains('collapsed')) {
+    sidebar.classList.remove('collapsed');
+    setHamburgerIcon(false);
+  } else {
+    sidebar.classList.add('collapsed');
+    setHamburgerIcon(true);
+  }
+});
+
+
+/* ══════════════════════════════════════════════════════
+   BUILD TIP / MISTAKE CARD
+══════════════════════════════════════════════════════ */
+const ENG_COLORS     = {amplify:'#ff6b35', unity:'#00e5ff', unreal:'#a78bfa'};
+const ENG_TEXT_COLORS= {amplify:'#fff',    unity:'#000',    unreal:'#fff'};
+
+function buildTipCard(item) {
+  const isTip = item.type === 'tip';
+  const card = document.createElement('div');
+  card.className = `tip-card tip-card--${item.type}`;
+
+  // Engine tags
+  const engTags = item.eng.map(e =>
+    `<span class="tip-eng-tag" style="background:${ENG_COLORS[e]};color:${ENG_TEXT_COLORS[e]}">${ENG_SHORT[e]}</span>`
+  ).join('');
+
+  card.innerHTML = `
+    <div class="tip-head">
+      <span class="tip-icon">${isTip ? '💡' : '⚠️'}</span>
+      <span class="tip-type-label">${isTip ? 'Tip' : 'Common Mistake'}</span>
+      <div class="tip-eng-tags">${engTags}</div>
+    </div>
+    <div class="tip-node-name">${item.node}</div>
+    <div class="tip-body">${item.text}</div>
+  `;
+
+  return card;
+}
+
+function pickRandomTips(count) {
+  const tips     = (window._TIPS || []).filter(t => t.type === 'tip');
+  const mistakes = (window._TIPS || []).filter(t => t.type === 'mistake');
+  const picked = [];
+  if (tips.length)     picked.push(tips[Math.floor(Math.random() * tips.length)]);
+  if (mistakes.length) picked.push(mistakes[Math.floor(Math.random() * mistakes.length)]);
+  // Fill remaining slots with random from either pool
+  const all = [...tips, ...mistakes];
+  while (picked.length < count && all.length) {
+    const candidate = all[Math.floor(Math.random() * all.length)];
+    if (!picked.includes(candidate)) picked.push(candidate);
+    else if (picked.length === all.length) break; // avoid infinite loop
+  }
+  return picked;
+}
+/* ══════════════════════════════════════════════════════
+   RANDOM TERM — thuật ngữ chuyên ngành
+══════════════════════════════════════════════════════ */
+let _lastTermIdx = -1;
+function pickRandomTerm() {
+  const terms = window.TERMS || [];
+  if (!terms.length) return null;
+  let idx;
+  do { idx = Math.floor(Math.random() * terms.length); } while (idx === _lastTermIdx && terms.length > 1);
+  _lastTermIdx = idx;
+  return terms[idx];
+}
+
+function renderTermCard(container) {
+  const t = pickRandomTerm();
+  if (!t) return;
+  container.innerHTML = '';
+  const card = document.createElement('div');
+  card.className = 'term-card';
+  card.innerHTML =
+    `<div class="term-head">` +
+      `<span class="term-tag">${t.tag}</span>` +
+      `<span class="term-name">${t.term}</span>` +
+    `</div>` +
+    `<div class="term-def">${t.def}</div>`;
+  container.appendChild(card);
+}
+
+/* ══════════════════════════════════════════════════════
+   SPLASH — random node + tips/mistakes on load
+══════════════════════════════════════════════════════ */
+function pickSplash() {
+  // Random 1 node từ bất kỳ engine và group nào
+  const engKeys = Object.keys(window._ENGINES).filter(k => (window._ENGINES[k] || []).length);
+  const eng = engKeys[Math.floor(Math.random() * engKeys.length)];
+  const groups = window._ENGINES[eng];
+  const g = groups[Math.floor(Math.random() * groups.length)];
+  const node = g.nodes[Math.floor(Math.random() * g.nodes.length)];
+  return { eng, g, node };
+}
+
+function randomizeNode() {
+  const { eng, g, node } = pickSplash();
+
+  const nodeRow = document.getElementById('splash-node-meta');
+  const nodeGrid = document.getElementById('splash-node-grid');
+  if (!nodeRow || !nodeGrid) return;
+
+  nodeRow.innerHTML =
+    `<span class="tip-eng-tag" style="background:${ENG_COLORS[eng]};color:${ENG_TEXT_COLORS[eng]}">${ENG_SHORT[eng]}</span>` +
+    `<span class="splash-group-label">${g.ico} ${g.label}</span>`;
+
+  nodeGrid.className = `node-grid eng-${eng}`;
+  nodeGrid.innerHTML = '';
+  nodeGrid.appendChild(buildCard(node, g, { autoExpand: true }));
+}
+
+function renderSplash() {
+  const { eng, g, node } = pickSplash();
+
+  state.splash = true;
+  document.querySelectorAll('.engine-tab').forEach(t => t.classList.remove('active'));
+  renderSidebar();
+
+  const main = document.getElementById('main');
+  main.innerHTML = '';
+
+  /* ── Wrapper layout: 2 cols ── */
+  const wrapper = document.createElement('div');
+  wrapper.className = 'splash-wrapper';
+
+  /* ─── COL LEFT: random node + random term below ─── */
+  const colNode = document.createElement('div');
+  colNode.className = 'splash-col';
+
+  if (homeConfig.showNode) {
+    const nodeSection = document.createElement('div');
+    nodeSection.className = 'splash-section-label';
+    nodeSection.innerHTML = `<span class="splash-dice-btn" id="splash-dice" title="Random node khác">⚄</span> Random Node`;
+    colNode.appendChild(nodeSection);
+
+    const nodeRow = document.createElement('div');
+    nodeRow.className = 'splash-node-meta';
+    nodeRow.id = 'splash-node-meta';
+    nodeRow.innerHTML =
+      `<span class="tip-eng-tag" style="background:${ENG_COLORS[eng]};color:${ENG_TEXT_COLORS[eng]}">${ENG_SHORT[eng]}</span>` +
+      `<span class="splash-group-label">${g.ico} ${g.label}</span>`;
+    colNode.appendChild(nodeRow);
+
+    const nodeGrid = document.createElement('div');
+    nodeGrid.className = `node-grid eng-${eng}`;
+    nodeGrid.id = 'splash-node-grid';
+    nodeGrid.appendChild(buildCard(node, g, { autoExpand: true }));
+    colNode.appendChild(nodeGrid);
+  }
+
+  if (homeConfig.showTerm) {
+    const termSection = document.createElement('div');
+    termSection.className = 'splash-section-label';
+    termSection.innerHTML = `<span class="splash-dice-btn" id="splash-term-dice" title="Random thuật ngữ khác">⚄</span> Random Term`;
+    colNode.appendChild(termSection);
+
+    const termCard = document.createElement('div');
+    termCard.id = 'term-card-slot';
+    colNode.appendChild(termCard);
+
+    renderTermCard(termCard);
+  }
+
+  /* ─── COL RIGHT: 1 tip + 1 mistake ─── */
+  const colTips = document.createElement('div');
+  colTips.className = 'splash-col';
+
+  if (homeConfig.showTips) {
+    const tipsSection = document.createElement('div');
+    tipsSection.className = 'splash-section-label';
+    tipsSection.innerHTML = `<span class="splash-dice-btn" id="splash-tips-dice" title="Random tips khác">⚄</span> Tips & Common Mistakes`;
+    colTips.appendChild(tipsSection);
+
+    const tipsContainer = document.createElement('div');
+    tipsContainer.className = 'tips-grid';
+    tipsContainer.id = 'tips-container';
+    pickRandomTips(2).forEach(t => tipsContainer.appendChild(buildTipCard(t)));
+    colTips.appendChild(tipsContainer);
+  }
+
+  wrapper.appendChild(colNode);
+  wrapper.appendChild(colTips);
+  main.appendChild(wrapper);
+
+  /* ─── Event listeners ─── */
+  document.getElementById('splash-dice')?.addEventListener('click', randomizeNode);
+  document.getElementById('splash-term-dice')?.addEventListener('click', () => {
+    const slot = document.getElementById('term-card-slot');
+    if (slot) renderTermCard(slot);
+  });
+  document.getElementById('splash-tips-dice')?.addEventListener('click', () => {
+    const tc = document.getElementById('tips-container');
+    if (!tc) return;
+    tc.innerHTML = '';
+    pickRandomTips(2).forEach(t => tc.appendChild(buildTipCard(t)));
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   HOME CONFIG MODAL
+══════════════════════════════════════════════════════ */
+function openHomeConfigModal() {
+  let overlay = document.getElementById('home-config-overlay');
+  if (overlay) { overlay.remove(); return; }
+
+  overlay = document.createElement('div');
+  overlay.id = 'home-config-overlay';
+  overlay.className = 'home-config-overlay';
+  overlay.innerHTML = `
+    <div class="home-config-modal">
+      <div class="home-config-header">
+        <span class="home-config-title">⚙️ Cấu hình</span>
+        <button class="home-config-close" id="home-config-close">✕</button>
+      </div>
+      <p class="home-config-sub">Chọn widget hiển thị ở chế độ index</p>
+      <div class="home-config-options">
+        <label class="home-config-option">
+          <span class="home-config-option-text">
+            <span class="home-config-option-icon">🎲</span>
+            <span>Random Node</span>
+          </span>
+          <input type="checkbox" id="cfg-node" ${homeConfig.showNode ? 'checked' : ''}>
+          <span class="home-config-toggle"></span>
+        </label>
+        <label class="home-config-option">
+          <span class="home-config-option-text">
+            <span class="home-config-option-icon">📖</span>
+            <span>Random Term</span>
+          </span>
+          <input type="checkbox" id="cfg-term" ${homeConfig.showTerm ? 'checked' : ''}>
+          <span class="home-config-toggle"></span>
+        </label>
+        <label class="home-config-option">
+          <span class="home-config-option-text">
+            <span class="home-config-option-icon">💡</span>
+            <span>Tips & Common Mistakes</span>
+          </span>
+          <input type="checkbox" id="cfg-tips" ${homeConfig.showTips ? 'checked' : ''}>
+          <span class="home-config-toggle"></span>
+        </label>
+      </div>
+      <button class="home-config-apply" id="home-config-apply">Áp dụng</button>
+      <button class="home-config-reload" id="home-config-reload">↺ Reload JS cache</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.getElementById('home-config-close').addEventListener('click', () => overlay.remove());
+  document.getElementById('home-config-reload').addEventListener('click', () => {
+    document.getElementById('home-config-reload').textContent = '⏳ Đang reload…';
+    document.getElementById('home-config-reload').disabled = true;
+    const v = Date.now();
+    const base = location.href.split('?')[0].split('#')[0];
+    const hash = location.hash || '';
+    location.replace(base + '?v=' + v + hash);
+  });
+  document.getElementById('home-config-apply').addEventListener('click', () => {
+    homeConfig.showNode = document.getElementById('cfg-node').checked;
+    homeConfig.showTerm = document.getElementById('cfg-term').checked;
+    homeConfig.showTips = document.getElementById('cfg-tips').checked;
+    saveHomeConfig(homeConfig);
+    overlay.remove();
+    if (state.splash) renderSplash();
+  });
+}
+
+/* ══════════════════════════════════════════════════════
+   INIT — gọi sau khi loadEngines() xong
+══════════════════════════════════════════════════════ */
+function initApp() {
+  const hash = location.hash.replace('#', '').toLowerCase();
+  const engFromHash = HASH_TO_ENG[hash];
+  if (engFromHash) {
+    activateEngine(engFromHash);
+  } else {
+    state.splash = true;
+    state.activeEngine = null;
+    document.getElementById('sidebar').classList.add('collapsed');
+    setHamburger3Mode();
+    renderSidebar();
+    renderSplash();
+  }
+}
+</script>
+<a class="creator-tag" title="Back to top" onclick="window.scrollTo({top:0,behavior:'smooth'})">Creator: <span>buonber</span></a>
+</body>
+</html>

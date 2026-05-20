@@ -1,0 +1,1086 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NodeHub Editor</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<script src="data/config.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root {
+    --bg: #0d0d0f; --bg2: #141418; --bg3: #1c1c22; --bg4: #24242c;
+    --border: #2e2e38; --border2: #3a3a48;
+    --text: #e2e2ee; --text2: #9898b0; --text3: #5a5a72;
+    --accent: #7c6af7; --accent2: #ff6b6b; --accent4: #ffd166;
+    --green: #06d6a0; --red: #ef476f;
+    --r: 10px; --r2: 6px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; line-height: 1.5; min-height: 100vh; -webkit-text-size-adjust: 100%; }
+
+  /* Lock */
+  #lock-screen { position: fixed; inset: 0; background: var(--bg); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
+  .lock-box { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 32px 28px; display: flex; flex-direction: column; align-items: center; gap: 16px; width: 100%; max-width: 340px; }
+  .lock-icon { font-size: 36px; }
+  .lock-title { font-size: 18px; font-weight: 600; }
+  .lock-sub { font-size: 12px; color: var(--text2); text-align: center; }
+  .lock-box input { width: 100%; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r2); color: var(--text); font-size: 16px; padding: 12px 14px; outline: none; text-align: center; letter-spacing: 4px; }
+  .lock-box input:focus { border-color: var(--accent); }
+  .lock-btn { width: 100%; background: var(--accent); border: none; border-radius: var(--r2); color: #fff; font-size: 15px; font-weight: 600; padding: 12px; cursor: pointer; }
+  .lock-btn:active { opacity: .8; }
+  .lock-err { color: var(--red); font-size: 12px; display: none; }
+  @keyframes shake {
+    0%,100% { transform: translateX(0); }
+    20%      { transform: translateX(-8px); }
+    40%      { transform: translateX(8px); }
+    60%      { transform: translateX(-5px); }
+    80%      { transform: translateX(5px); }
+  }
+  .lock-box.shake { animation: shake .4s ease; }
+  .lock-home { color: var(--text3); font-size: 12px; text-decoration: none; }
+  .lock-home:hover { color: var(--text2); }
+
+  /* App */
+  #app { display: none; flex-direction: column; height: 100vh; height: 100dvh; }
+
+  /* Header */
+  header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 16px; height: 52px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+  .hd-logo { font-weight: 700; font-size: 15px; color: var(--accent); letter-spacing: .5px; white-space: nowrap; }
+  .hd-logo span { color: var(--text2); font-weight: 400; }
+  .hd-tab-bar { display: flex; gap: 4px; margin-left: 12px; }
+  .hd-tab { background: transparent; border: 1px solid transparent; border-radius: var(--r2); color: var(--text2); cursor: pointer; font-size: 12px; font-weight: 500; padding: 5px 12px; transition: all .15s; white-space: nowrap; }
+  .hd-tab:hover { color: var(--text); background: var(--bg3); }
+  .hd-tab.active { background: var(--bg4); border-color: var(--border2); color: var(--text); }
+  .hd-spacer { flex: 1; }
+  .hd-actions { display: flex; gap: 6px; align-items: center; }
+  .btn { border-radius: var(--r2); border: 1px solid var(--border2); cursor: pointer; font-size: 12px; font-weight: 500; padding: 6px 12px; transition: all .15s; text-decoration: none; display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+  .btn-ghost { background: transparent; color: var(--text2); }
+  .btn-ghost:hover { color: var(--text); border-color: var(--text3); }
+  .btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn-primary:hover { opacity: .85; }
+  .btn-green { background: var(--green); border-color: var(--green); color: #000; font-weight: 700; }
+  .btn-green:hover { opacity: .85; }
+  .btn-blue { background: #3b82f6; border-color: #3b82f6; color: #fff; font-weight: 700; }
+  .btn-blue:hover { opacity: .85; }
+
+  .content { flex: 1; overflow: hidden; display: flex; min-height: 0; }
+  .tab-pane { display: none; flex: 1; overflow: hidden; flex-direction: column; min-height: 0; }
+  .tab-pane.active { display: flex; }
+
+  /* Toolbar */
+  .toolbar { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 8px 16px; display: flex; align-items: center; gap: 8px; flex-shrink: 0; flex-wrap: wrap; }
+  .toolbar select, .toolbar input[type=text] { background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r2); color: var(--text); font-size: 12px; padding: 6px 10px; outline: none; min-width: 0; }
+  .toolbar select:focus, .toolbar input[type=text]:focus { border-color: var(--accent); }
+  .toolbar label { color: var(--text2); font-size: 12px; white-space: nowrap; }
+  .sep { width: 1px; height: 20px; background: var(--border); margin: 0 2px; }
+  .count-badge { background: var(--bg3); border: 1px solid var(--border); border-radius: 20px; color: var(--text3); font-size: 11px; padding: 1px 10px; white-space: nowrap; }
+
+  /* Table */
+  .table-wrap { flex: 1; overflow: auto; padding: 12px 16px; -webkit-overflow-scrolling: touch; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { background: var(--bg2); border-bottom: 1px solid var(--border); color: var(--text2); font-size: 11px; font-weight: 600; letter-spacing: .5px; padding: 8px 10px; text-align: left; text-transform: uppercase; position: sticky; top: 0; z-index: 1; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background .1s; }
+  tbody tr:hover { background: var(--bg2); }
+  tbody td { padding: 8px 10px; vertical-align: top; }
+  .td-name { font-weight: 600; color: var(--text); }
+  .td-sub { color: var(--text2); font-size: 11px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .td-func { color: var(--text2); font-size: 11px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .td-actions { display: flex; gap: 6px; white-space: nowrap; }
+  .td-badge { background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; color: var(--text2); font-size: 10px; padding: 1px 6px; display: inline-block; }
+  .td-badge.tip { border-color: #ffd16666; color: var(--accent4); }
+  .td-badge.mistake { border-color: #ef476f66; color: var(--red); }
+  .td-eng-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+  .eng-dot { border-radius: 3px; font-size: 10px; padding: 1px 5px; font-weight: 600; }
+  .eng-dot.amplify { background: #ff6b3522; color: #ff6b35; border: 1px solid #ff6b3544; }
+  .eng-dot.unity   { background: #00e5ff22; color: #00e5ff; border: 1px solid #00e5ff44; }
+  .eng-dot.unreal  { background: #a78bfa22; color: #a78bfa; border: 1px solid #a78bfa44; }
+  .btn-sm { background: var(--bg3); border: 1px solid var(--border2); border-radius: 4px; color: var(--text2); cursor: pointer; font-size: 11px; padding: 4px 10px; transition: all .12s; min-height: 28px; }
+  .btn-sm:hover { color: var(--text); border-color: var(--text3); }
+  .btn-sm.del:hover { color: var(--red); border-color: var(--red); }
+  .btn-sm.edit:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* Modal */
+  .modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,.75); display: none; align-items: flex-end; justify-content: center; z-index: 500; }
+  .modal-bg.open { display: flex; }
+  .modal-panel { background: var(--bg2); border: 1px solid var(--border2); border-radius: var(--r) var(--r) 0 0; max-height: 92dvh; overflow-y: auto; width: 100%; padding: 20px 20px 40px; display: flex; flex-direction: column; gap: 16px; -webkit-overflow-scrolling: touch; }
+  .modal-title { font-size: 15px; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
+  .modal-close { background: none; border: none; color: var(--text3); cursor: pointer; margin-left: auto; font-size: 20px; line-height: 1; padding: 4px 8px; }
+  .modal-close:hover { color: var(--text); }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field label { font-size: 11px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: .5px; }
+  .field input, .field select, .field textarea { background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r2); color: var(--text); font-size: 16px; padding: 10px 12px; outline: none; font-family: inherit; resize: vertical; width: 100%; }
+  .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+  .field-row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .field-row .field { flex: 1; min-width: 120px; }
+  .eng-checks { display: flex; gap: 10px; flex-wrap: wrap; }
+  .eng-check { align-items: center; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r2); cursor: pointer; display: flex; gap: 6px; font-size: 13px; padding: 8px 14px; transition: all .15s; user-select: none; }
+  .eng-check input { display: none; }
+  .eng-check.checked-amplify { border-color: #ff6b35; background: #ff6b3515; color: #ff6b35; }
+  .eng-check.checked-unity   { border-color: #00e5ff; background: #00e5ff15; color: #00e5ff; }
+  .eng-check.checked-unreal  { border-color: #a78bfa; background: #a78bfa15; color: #a78bfa; }
+  .modal-actions { display: flex; gap: 8px; justify-content: flex-end; padding-top: 4px; }
+  .modal-actions .btn { padding: 10px 18px; font-size: 13px; }
+  .params-list { display: flex; flex-direction: column; gap: 6px; }
+  .param-row-edit { display: flex; gap: 8px; align-items: center; }
+  .param-row-edit input { flex: 1; }
+  .param-del { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 18px; padding: 2px 4px; min-width: 28px; }
+  .param-del:hover { color: var(--red); }
+  .add-param-btn { background: var(--bg3); border: 1px dashed var(--border2); border-radius: var(--r2); color: var(--text3); cursor: pointer; font-size: 12px; padding: 8px; text-align: center; transition: all .15s; }
+  .add-param-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Export pane */
+  .export-wrap { flex: 1; overflow: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 20px; -webkit-overflow-scrolling: touch; }
+  .export-section-title { font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 1px; }
+  .export-cards { display: flex; gap: 12px; flex-wrap: wrap; }
+  .export-card { background: var(--bg2); border: 1px solid var(--border); border-radius: var(--r); padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 200px; }
+  .export-card-title { font-size: 13px; font-weight: 700; color: var(--text); }
+  .export-card-sub { font-size: 11px; color: var(--text2); line-height: 1.6; }
+  .export-card select { background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r2); color: var(--text); font-size: 14px; padding: 8px 10px; outline: none; width: 100%; }
+  .export-big { background: var(--bg2); border: 2px solid var(--green); border-radius: var(--r); padding: 14px 18px; display: flex; gap: 12px; align-items: center; width: fit-content; max-width: 100%; }
+  .export-big-icon { font-size: 24px; flex-shrink: 0; }
+  .export-big-body { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+  .export-big-title { font-size: 14px; font-weight: 700; color: var(--green); white-space: nowrap; }
+  .export-big-sub { display: none; }
+  .export-big-btn { font-size: 13px; padding: 8px 16px; white-space: nowrap; }
+  .export-top-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .export-upload-row { display: none; }
+  .export-upload-btn { font-size: 13px; padding: 8px 16px; white-space: nowrap; }
+  .export-upload-hint { font-size: 11px; color: var(--text3); }
+
+  /* Toast */
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--bg4); border: 1px solid var(--border2); border-radius: var(--r2); color: var(--text); font-size: 12px; padding: 10px 18px; opacity: 0; transition: all .25s; z-index: 9999; max-width: calc(100vw - 32px); text-align: center; }
+  #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+  #toast.ok { border-color: var(--green); color: var(--green); }
+  #toast.err { border-color: var(--red); color: var(--red); }
+
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  /* ══ MOBILE (≤ 640px) ══ */
+  @media (max-width: 640px) {
+    /* Header: 2-row layout */
+    header { height: auto; flex-wrap: wrap; padding: 10px 12px 0; gap: 0; }
+    .hd-logo { flex: 1; padding-bottom: 10px; }
+    .hd-tab-bar { order: 10; width: 100%; margin: 0; border-top: 1px solid var(--border); padding: 6px 0 4px; display: flex; gap: 2px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+    .hd-tab-bar::-webkit-scrollbar { display: none; }
+    .hd-tab { font-size: 11px; padding: 6px 10px; flex-shrink: 0; }
+    .hd-spacer { display: none; }
+    /* Hide secondary header buttons */
+    .hd-home, .hd-refresh { display: none !important; }
+    #logout-btn { font-size: 11px; padding: 5px 8px; }
+    #add-btn { font-size: 12px; padding: 6px 12px; }
+
+    /* Toolbar: hide labels, grow selects/inputs */
+    .toolbar { padding: 8px 12px; gap: 6px; }
+    .toolbar label { display: none; }
+    .toolbar select { flex: 1; font-size: 14px; padding: 7px 8px; }
+    .toolbar input[type=text] { flex: 1; font-size: 14px; padding: 7px 8px; }
+    .sep { display: none; }
+
+    /* Table: hide secondary columns */
+    .table-wrap { padding: 8px 4px; }
+    thead th.col-hide, tbody td.col-hide { display: none; }
+    thead th, tbody td { padding: 8px 8px; font-size: 12px; }
+    .td-func { max-width: 120px; }
+    .td-sub { max-width: 90px; }
+
+    /* Modal: bottom sheet */
+    .modal-panel { border-radius: 14px 14px 0 0; padding: 20px 16px 48px; max-height: 90dvh; }
+    .field input, .field select, .field textarea { font-size: 16px; }
+    .field-row { flex-direction: column; gap: 12px; }
+    .field-row .field { min-width: unset; }
+    .modal-actions { gap: 8px; }
+    .modal-actions .btn { flex: 1; justify-content: center; }
+
+    /* Export */
+    .export-wrap { padding: 16px 12px; }
+    .export-big { flex-wrap: wrap; gap: 10px; padding: 12px; }
+    .export-cards { flex-direction: column; }
+    .export-card { min-width: unset; }
+  }
+
+  /* ══ DESKTOP: center modal ══ */
+  @media (min-width: 641px) {
+    .modal-bg { align-items: center; padding: 20px; }
+    .modal-panel { border-radius: var(--r); max-width: 620px; }
+  }
+
+  /* Tag chips in editor */
+  .tag-known { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+  .tag-preset { background: var(--bg3); border: 1px solid var(--border2); border-radius: 4px; color: var(--text2); cursor: pointer; font-size: 11px; font-weight: 600; padding: 3px 8px; transition: all .12s; }
+  .tag-preset:hover { border-color: var(--accent); color: var(--accent); }
+  .tag-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .tag-chips:empty { display: none; }
+  .tag-chip { display: inline-flex; align-items: center; gap: 4px; border-radius: 4px; font-size: 11px; font-weight: 700; padding: 3px 8px; cursor: default; }
+  .tag-chip .chip-del { background: none; border: none; cursor: pointer; font-size: 13px; line-height: 1; padding: 0; opacity: .7; color: inherit; }
+  .tag-chip .chip-del:hover { opacity: 1; }
+  .tag-chip.urp   { background:#0ea5e922; color:#0ea5e9; border:1px solid #0ea5e966; }
+  .tag-chip.hdrp  { background:#a78bfa22; color:#a78bfa; border:1px solid #a78bfa66; }
+  .tag-chip.ue5   { background:#ff6b3522; color:#ff6b35; border:1px solid #ff6b3566; }
+  .tag-chip.u2022 { background:#fbbf2422; color:#fbbf24; border:1px solid #fbbf2466; }
+  .tag-chip.u2023 { background:#f472b622; color:#f472b6; border:1px solid #f472b666; }
+  .tag-chip.custom{ background:#7c6af722; color:#7c6af7; border:1px solid #7c6af766; }
+  .tag-add-row { display: flex; gap: 6px; margin-top: 4px; }
+  .tag-add-row input { flex: 1; background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r2); color: var(--text); font-size: 14px; padding: 7px 10px; outline: none; }
+  .tag-add-row input:focus { border-color: var(--accent); }
+  .tag-add-row button { background: var(--bg3); border: 1px solid var(--border2); border-radius: var(--r2); color: var(--text2); cursor: pointer; font-size: 12px; padding: 6px 12px; white-space: nowrap; }
+  .tag-add-row button:hover { border-color: var(--accent); color: var(--accent); }
+
+</style>
+</head>
+<body>
+
+<!-- LOCK -->
+<div id="lock-screen">
+  <div class="lock-box">
+    <div class="lock-icon">🔐</div>
+    <div class="lock-title">NodeHub Editor</div>
+    <div class="lock-sub">Yêu cầu mật khẩu để truy cập.</div>
+    <input type="password" id="lock-pw" placeholder="Nhập mật khẩu…" autocomplete="off">
+    <div class="lock-err" id="lock-err">❌ Sai mật khẩu. Thử lại.</div>
+    <button class="lock-btn" id="lock-btn">Đăng nhập</button>
+    <a href="index.html" class="lock-home">← Quay về trang chính</a>
+  </div>
+</div>
+
+<!-- APP -->
+<div id="app">
+  <header>
+    <div class="hd-logo">NodeHub <span>Editor</span></div>
+    <div class="hd-tab-bar">
+      <button class="hd-tab active" data-tab="nodes">⬡ Nodes</button>
+      <button class="hd-tab" data-tab="terms">📖 Terms</button>
+      <button class="hd-tab" data-tab="tips">💡 Tips</button>
+      <button class="hd-tab" data-tab="export">⬇ Export</button>
+    </div>
+    <div class="hd-spacer"></div>
+    <div class="hd-actions">
+      <a href="index.html" class="btn btn-ghost hd-home">← Trang chính</a>
+      <button class="btn btn-ghost hd-refresh" id="refresh-btn" title="Tải lại toàn bộ data từ file JS">↺ Refresh data</button>
+      <button class="btn btn-ghost" id="logout-btn" title="Đăng xuất">🔒 Đăng xuất</button>
+      <button class="btn btn-primary" id="add-btn">+ Thêm mới</button>
+    </div>
+  </header>
+
+  <div class="content">
+
+    <!-- NODES -->
+    <div class="tab-pane active" id="tab-nodes">
+      <div class="toolbar">
+        <label>Mode:</label>
+        <select id="node-eng-filter">
+          <option value="amplify">ASE – Amplify Shader Editor</option>
+          <option value="unity">USG – Unity Shader Graph</option>
+          <option value="unreal">UMG – Unreal Material Graph</option>
+        </select>
+        <label>Group:</label>
+        <select id="node-group-filter"><option value="">Tất cả groups</option></select>
+        <input type="text" id="node-search" placeholder="Tìm node…" style="width:200px">
+        <div class="sep"></div>
+        <span class="count-badge" id="node-count">0 nodes</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Tên node</th><th>Group</th><th class="col-hide">Tags</th><th class="col-hide">Category</th><th class="col-hide">Shortcut</th><th>Mô tả</th><th style="width:90px">Actions</th>
+          </tr></thead>
+          <tbody id="node-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TERMS -->
+    <div class="tab-pane" id="tab-terms">
+      <div class="toolbar">
+        <input type="text" id="term-search" placeholder="Tìm thuật ngữ…" style="width:220px">
+        <div class="sep"></div>
+        <span class="count-badge" id="term-count">0 terms</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Thuật ngữ</th><th>Tag</th><th>Định nghĩa</th><th style="width:90px">Actions</th>
+          </tr></thead>
+          <tbody id="term-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- TIPS -->
+    <div class="tab-pane" id="tab-tips">
+      <div class="toolbar">
+        <label>Loại:</label>
+        <select id="tips-type-filter">
+          <option value="">Tất cả</option>
+          <option value="tip">💡 Tip</option>
+          <option value="mistake">⚠️ Common Mistake</option>
+        </select>
+        <input type="text" id="tips-search" placeholder="Tìm tip / node…" style="width:200px">
+        <div class="sep"></div>
+        <span class="count-badge" id="tips-count">0 tips</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Loại</th><th>Node</th><th class="col-hide">Mode</th><th class="col-hide">Nội dung</th><th style="width:90px">Actions</th>
+          </tr></thead>
+          <tbody id="tips-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- EXPORT -->
+    <div class="tab-pane" id="tab-export">
+      <div class="export-wrap">
+
+        <!-- Main: export full zip + deploy -->
+        <div class="export-top-row">
+          <div class="export-big">
+            <div class="export-big-icon">📦</div>
+            <div class="export-big-body">
+              <div class="export-big-title">Download toàn bộ project (.zip)</div>
+              <button class="btn btn-green export-big-btn" id="btn-export-zip">⬇ nodehub.zip</button>
+            </div>
+          </div>
+          <button class="btn btn-blue export-upload-btn" id="btn-upload-project">🐙 GitHub</button>
+        </div>
+
+        <!-- Individual exports -->
+        <div class="export-section-title">Hoặc download từng file riêng</div>
+        <div class="export-cards">
+
+          <div class="export-card">
+            <div class="export-card-title">⬡ Nodes JS</div>
+            <div class="export-card-sub">Export nodes của 1 engine ra file <code>.js</code> tương thích <code>DATA_DEFAULT</code></div>
+            <select id="export-eng">
+              <option value="amplify">ASE → node_ase.js</option>
+              <option value="unity">USG → node_usg.js</option>
+              <option value="unreal">UMG → node_umg.js</option>
+            </select>
+            <button class="btn btn-ghost" id="btn-export-nodes">⬇ Download</button>
+          </div>
+
+          <div class="export-card">
+            <div class="export-card-title">📖 Terms JS</div>
+            <div class="export-card-sub">Export tất cả terms ra <code>terms.js</code> — biến <code>window.TERMS</code></div>
+            <button class="btn btn-ghost" id="btn-export-terms">⬇ Download terms.js</button>
+          </div>
+
+          <div class="export-card">
+            <div class="export-card-title">💡 Tips JS</div>
+            <div class="export-card-sub">Export tất cả tips & mistakes ra <code>tips.js</code> — biến <code>DATA_TIPS</code></div>
+            <button class="btn btn-ghost" id="btn-export-tips">⬇ Download tips.js</button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- MODAL: Node -->
+<div class="modal-bg" id="node-modal">
+  <div class="modal-panel">
+    <div class="modal-title">
+      ⬡ <span id="node-modal-title">Thêm Node</span>
+      <button class="modal-close" data-close="node-modal">✕</button>
+    </div>
+    <input type="hidden" id="nm-eng">
+    <input type="hidden" id="nm-gid">
+    <input type="hidden" id="nm-nidx">
+    <div class="field-row">
+      <div class="field" style="flex:2">
+        <label>Tên Node *</label>
+        <input type="text" id="nm-name" placeholder="VD: Lerp">
+      </div>
+      <div class="field" style="flex:1">
+        <label>Category</label>
+        <input type="text" id="nm-cat" placeholder="VD: Interpolation">
+      </div>
+      <div class="field" style="flex:1">
+        <label>Shortcut</label>
+        <input type="text" id="nm-sc" placeholder="VD: A, M+click">
+      </div>
+    </div>
+    <div class="field">
+      <label>Group *</label>
+      <select id="nm-group"></select>
+    </div>
+    <div class="field">
+      <label>Mô tả (HTML được chấp nhận)</label>
+      <textarea id="nm-func" rows="4" placeholder="Mô tả chức năng của node…"></textarea>
+    </div>
+    <div class="field">
+      <label>Tags <span style="font-weight:400;color:var(--text3)">(version, pipeline…)</span></label>
+      <div class="tag-known">
+        <span class="tag-preset" data-tag="ue5">UE5+</span>
+        <span class="tag-preset" data-tag="u2022">2022+</span>
+        <span class="tag-preset" data-tag="u2023">2023+</span>
+        <span class="tag-preset" data-tag="urp">URP</span>
+        <span class="tag-preset" data-tag="hdrp">HDRP</span>
+      </div>
+      <div class="tag-chips" id="nm-tag-chips"></div>
+      <div class="tag-add-row">
+        <input type="text" id="nm-tag-input" placeholder="Thêm tag tùy chỉnh…">
+        <button id="nm-tag-add-btn">+ Add</button>
+      </div>
+    </div>
+    <div class="field">
+      <label>Params <span style="font-weight:400;color:var(--text3)">(Tên → Mô tả)</span></label>
+      <div class="params-list" id="nm-params-list"></div>
+      <div class="add-param-btn" id="nm-add-param">+ Thêm param</div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-close="node-modal">Hủy</button>
+      <button class="btn btn-primary" id="nm-save">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Term -->
+<div class="modal-bg" id="term-modal">
+  <div class="modal-panel">
+    <div class="modal-title">
+      📖 <span id="term-modal-title">Thêm Term</span>
+      <button class="modal-close" data-close="term-modal">✕</button>
+    </div>
+    <input type="hidden" id="tm-idx">
+    <div class="field-row">
+      <div class="field" style="flex:2">
+        <label>Thuật ngữ *</label>
+        <input type="text" id="tm-term" placeholder="VD: Normal Map">
+      </div>
+      <div class="field" style="flex:1">
+        <label>Tag *</label>
+        <input type="text" id="tm-tag" placeholder="VD: Rendering">
+      </div>
+    </div>
+    <div class="field">
+      <label>Định nghĩa *</label>
+      <textarea id="tm-def" rows="5" placeholder="Giải thích dễ hiểu bằng tiếng Việt…"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-close="term-modal">Hủy</button>
+      <button class="btn btn-primary" id="tm-save">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL: Tip -->
+<div class="modal-bg" id="tip-modal">
+  <div class="modal-panel">
+    <div class="modal-title">
+      💡 <span id="tip-modal-title">Thêm Tip</span>
+      <button class="modal-close" data-close="tip-modal">✕</button>
+    </div>
+    <input type="hidden" id="tipm-idx">
+    <div class="field-row">
+      <div class="field">
+        <label>Loại *</label>
+        <select id="tipm-type">
+          <option value="tip">💡 Tip</option>
+          <option value="mistake">⚠️ Common Mistake</option>
+        </select>
+      </div>
+      <div class="field" style="flex:2">
+        <label>Tên Node / Chủ đề *</label>
+        <input type="text" id="tipm-node" placeholder="VD: Lerp / Linear Interpolate">
+      </div>
+    </div>
+    <div class="field">
+      <label>Áp dụng cho Mode</label>
+      <div class="eng-checks" id="tipm-engs">
+        <label class="eng-check" data-eng="amplify"><input type="checkbox" value="amplify"> ASE</label>
+        <label class="eng-check" data-eng="unity"><input type="checkbox" value="unity"> USG</label>
+        <label class="eng-check" data-eng="unreal"><input type="checkbox" value="unreal"> UMG</label>
+      </div>
+    </div>
+    <div class="field">
+      <label>Nội dung (HTML được chấp nhận)</label>
+      <textarea id="tipm-text" rows="5" placeholder="Nội dung tip hoặc mô tả lỗi thường gặp…"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" data-close="tip-modal">Hủy</button>
+      <button class="btn btn-primary" id="tipm-save">Lưu</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ══ LOCK ══ */
+const CORRECT_PW = (window.CONFIG && window.CONFIG.editPassword) ? window.CONFIG.editPassword : '000';
+const SESSION_KEY = 'nodehub_editor_auth';
+
+function showApp() {
+  document.getElementById('lock-screen').style.display = 'none';
+  document.getElementById('app').style.display = 'flex';
+  loadAllData();
+}
+
+function tryUnlock() {
+  if (document.getElementById('lock-pw').value === CORRECT_PW) {
+    sessionStorage.setItem(SESSION_KEY, '1');
+    showApp();
+  } else {
+    const box = document.querySelector('.lock-box');
+    document.getElementById('lock-err').style.display = 'block';
+    document.getElementById('lock-pw').value = '';
+    document.getElementById('lock-pw').focus();
+    box.classList.remove('shake');
+    void box.offsetWidth; // reflow để restart animation
+    box.classList.add('shake');
+  }
+}
+
+function logout() {
+  sessionStorage.removeItem(SESSION_KEY);
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('lock-screen').style.display = 'flex';
+  document.getElementById('lock-pw').value = '';
+  document.getElementById('lock-err').style.display = 'none';
+  document.getElementById('lock-pw').focus();
+}
+
+document.getElementById('lock-btn').addEventListener('click', tryUnlock);
+document.getElementById('lock-pw').addEventListener('keydown', e => { if (e.key === 'Enter') tryUnlock(); });
+document.getElementById('logout-btn').addEventListener('click', logout);
+document.getElementById('refresh-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('refresh-btn');
+  btn.textContent = '↺ Đang tải…';
+  btn.disabled = true;
+  await loadAllData({ noCache: true });
+  btn.textContent = '↺ Refresh data';
+  btn.disabled = false;
+  toast('✅ Đã tải lại toàn bộ data');
+});
+
+// Auto-login nếu session còn hợp lệ
+if (sessionStorage.getItem(SESSION_KEY) === '1') {
+  showApp();
+}
+
+/* ══ STORE ══ */
+const STORE = { engines: { amplify: [], unity: [], unreal: [] }, terms: [], tips: [] };
+
+/* ══ TAG CONFIG ══ */
+const TAG_DEFS = {
+  ue5:   { label: 'UE5+',   bg:'#ff6b3522', color:'#ff6b35', border:'#ff6b3566' },
+  u2022: { label: '2022+', bg:'#fbbf2422', color:'#fbbf24', border:'#fbbf2466' },
+  u2023: { label: '2023+', bg:'#f472b622', color:'#f472b6', border:'#f472b666' },
+  urp:   { label: 'URP',   bg:'#0ea5e922', color:'#0ea5e9', border:'#0ea5e966' },
+  hdrp:  { label: 'HDRP',  bg:'#a78bfa22', color:'#a78bfa', border:'#a78bfa66' },
+};
+function tagLabel(t) { return TAG_DEFS[t] ? TAG_DEFS[t].label : t.toUpperCase(); }
+function tagClass(t) { return TAG_DEFS[t] ? t : 'custom'; }
+
+async function loadAllData({ noCache = false } = {}) {
+  const fetchOpts = noCache ? { cache: 'no-store' } : {};
+  const files = [
+    { key: 'amplify', src: 'data/node_ase.js' },
+    { key: 'unity',   src: 'data/node_usg.js' },
+    { key: 'unreal',  src: 'data/node_umg.js' },
+  ];
+  for (const f of files) {
+    try {
+      const code = await (await fetch(f.src, fetchOpts)).text();
+      STORE.engines[f.key] = new Function(code + '\nreturn DATA_DEFAULT;')();
+    } catch(e) { console.warn('Load fail:', f.src); }
+  }
+  try {
+    const code = await (await fetch('data/tips.js', fetchOpts)).text();
+    STORE.tips = new Function(code + '\nreturn DATA_TIPS;')();
+  } catch(e) {}
+  try {
+    const code = await (await fetch('data/terms.js', fetchOpts)).text();
+    new Function(code)();
+    STORE.terms = window.TERMS || [];
+  } catch(e) {}
+
+  // Also cache raw files for zip (index.html, style.css, config.js)
+  renderNodes(); renderTerms(); renderTips(); populateGroupFilter();
+}
+
+/* ══ TOAST ══ */
+let toastTimer;
+function toast(msg, type = 'ok') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.className = '', 2600);
+}
+
+/* ══ TABS ══ */
+let currentTab = 'nodes';
+document.querySelectorAll('.hd-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.hd-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    currentTab = tab.dataset.tab;
+    document.getElementById('tab-' + currentTab).classList.add('active');
+    document.getElementById('add-btn').style.display = currentTab === 'export' ? 'none' : '';
+    const labels = { nodes: '+ Thêm Node', terms: '+ Thêm Term', tips: '+ Thêm Tip' };
+    document.getElementById('add-btn').textContent = labels[currentTab] || '';
+  });
+});
+document.getElementById('add-btn').addEventListener('click', () => {
+  if (currentTab === 'nodes') openNodeModal();
+  if (currentTab === 'terms') openTermModal();
+  if (currentTab === 'tips') openTipModal();
+});
+
+/* ══ MODAL HELPERS ══ */
+document.querySelectorAll('[data-close]').forEach(btn =>
+  btn.addEventListener('click', () => document.getElementById(btn.dataset.close).classList.remove('open')));
+document.querySelectorAll('.modal-bg').forEach(bg =>
+  bg.addEventListener('click', e => { if (e.target === bg) bg.classList.remove('open'); }));
+
+/* ══ NODES ══ */
+function populateGroupFilter() {
+  const eng = document.getElementById('node-eng-filter').value;
+  const sel = document.getElementById('node-group-filter');
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">Tất cả groups</option>';
+  (STORE.engines[eng] || []).forEach(g => {
+    const opt = document.createElement('option');
+    opt.value = g.id; opt.textContent = `${g.ico} ${g.label}`;
+    sel.appendChild(opt);
+  });
+  sel.value = prev;
+}
+
+function renderNodes() {
+  const eng = document.getElementById('node-eng-filter').value;
+  const gid = document.getElementById('node-group-filter').value;
+  const q   = document.getElementById('node-search').value.trim().toLowerCase();
+  const tbody = document.getElementById('node-tbody');
+  tbody.innerHTML = '';
+  let count = 0;
+  (STORE.engines[eng] || []).forEach(g => {
+    if (gid && g.id !== gid) return;
+    g.nodes.forEach((n, ni) => {
+      if (q && !n.n.toLowerCase().includes(q) && !(n.f||'').toLowerCase().includes(q) && !(n.cat||'').toLowerCase().includes(q) && !(n.sc||'').toLowerCase().includes(q)) return;
+      count++;
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><div class="td-name">${n.n}</div></td>
+        <td><span class="td-badge">${g.ico} ${g.label}</span></td>
+        <td class="col-hide" style="white-space:nowrap">${(()=>{ const tt = (n.tags&&n.tags.length) ? n.tags : extractTagsFromHtml(n.f||''); return tt.length ? tt.map(t=>`<span class="tag-chip ${tagClass(t)}" style="padding:1px 6px;font-size:10px;font-weight:700;display:inline-flex;align-items:center;border-radius:3px">${tagLabel(t)}</span>`).join(' ') : '<span style="color:var(--text3)">—</span>'; })()}</td>
+        <td class="td-sub col-hide">${n.cat || '—'}</td>
+        <td class="td-sub col-hide">${n.sc  || '—'}</td>
+        <td class="td-func">${(n.f||'').replace(/<span class="tag [^"]*">[^<]*<\/span>/g,'').trim() || '<span style="color:var(--text3)">—</span>'}</td>
+        <td class="td-actions">
+          <button class="btn-sm edit" data-eng="${eng}" data-gid="${g.id}" data-ni="${ni}">✎</button>
+          <button class="btn-sm del"  data-eng="${eng}" data-gid="${g.id}" data-ni="${ni}">✕</button>
+        </td>`;
+      tbody.appendChild(tr);
+    });
+  });
+  document.getElementById('node-count').textContent = `${count} nodes`;
+  tbody.querySelectorAll('.btn-sm.edit').forEach(b => b.addEventListener('click', () => openNodeModal(b.dataset.eng, b.dataset.gid, +b.dataset.ni)));
+  tbody.querySelectorAll('.btn-sm.del').forEach(b  => b.addEventListener('click', () => deleteNode(b.dataset.eng, b.dataset.gid, +b.dataset.ni)));
+}
+
+document.getElementById('node-eng-filter').addEventListener('change', () => { populateGroupFilter(); renderNodes(); });
+document.getElementById('node-group-filter').addEventListener('change', renderNodes);
+document.getElementById('node-search').addEventListener('input', renderNodes);
+
+function openNodeModal(eng, gid, ni) {
+  const engVal = eng || document.getElementById('node-eng-filter').value;
+  const groupSel = document.getElementById('nm-group');
+  groupSel.innerHTML = '';
+  (STORE.engines[engVal] || []).forEach(g => {
+    const opt = document.createElement('option');
+    opt.value = g.id; opt.textContent = `${g.ico} ${g.label}`;
+    groupSel.appendChild(opt);
+  });
+  document.getElementById('nm-eng').value = engVal;
+  document.getElementById('nm-nidx').value = ni !== undefined ? ni : '';
+
+  document.getElementById('nm-sc').placeholder = 'VD: A, M+click';
+
+  if (ni !== undefined && gid) {
+    const g = STORE.engines[engVal].find(x => x.id === gid);
+    const n = g?.nodes[ni]; if (!n) return;
+    document.getElementById('node-modal-title').textContent = `Sửa — ${n.n}`;
+    document.getElementById('nm-gid').value = gid;
+    groupSel.value = gid;
+    document.getElementById('nm-name').value = n.n;
+    document.getElementById('nm-cat').value   = n.cat || '';
+    document.getElementById('nm-sc').value    = n.sc  || '';
+    // Strip inline tag spans from f (legacy → show in tags field)
+    const cleanF = (n.f || '').replace(/<span class="tag [^"]*">[^<]*<\/span>/g, '').trim();
+    document.getElementById('nm-func').value  = cleanF;
+    nmTags = n.tags ? [...n.tags] : extractTagsFromHtml(n.f || '');
+    renderTagChips();
+    renderParamsList(n.p || []);
+  } else {
+    document.getElementById('node-modal-title').textContent = 'Thêm Node mới';
+    document.getElementById('nm-gid').value = '';
+    document.getElementById('nm-name').value = '';
+    document.getElementById('nm-cat').value   = '';
+    document.getElementById('nm-sc').value   = '';
+    document.getElementById('nm-func').value = '';
+    nmTags = [];
+    renderTagChips();
+    renderParamsList([]);
+  }
+  document.getElementById('node-modal').classList.add('open');
+  document.getElementById('nm-name').focus();
+}
+
+function extractTagsFromHtml(f) {
+  const tags = [];
+  const re = /<span class="tag ([^"]+)">[^<]*<\/span>/g;
+  let m;
+  while ((m = re.exec(f)) !== null) { if (!tags.includes(m[1])) tags.push(m[1]); }
+  return tags;
+}
+
+function renderParamsList(params) {
+  const list = document.getElementById('nm-params-list');
+  list.innerHTML = '';
+  params.forEach(([k, v]) => addParamRow(k, v));
+}
+function addParamRow(k = '', v = '') {
+  const list = document.getElementById('nm-params-list');
+  const row = document.createElement('div');
+  row.className = 'param-row-edit';
+  row.innerHTML = `<input type="text" placeholder="Tên param" value="${k.replace(/"/g,'&quot;')}" class="param-key"><input type="text" placeholder="Mô tả" value="${v.replace(/"/g,'&quot;')}" class="param-val"><button class="param-del">✕</button>`;
+  row.querySelector('.param-del').addEventListener('click', () => row.remove());
+  list.appendChild(row);
+}
+document.getElementById('nm-add-param').addEventListener('click', () => addParamRow());
+
+/* ══ TAG CHIPS ══ */
+let nmTags = [];
+function renderTagChips() {
+  const container = document.getElementById('nm-tag-chips');
+  container.innerHTML = '';
+  nmTags.forEach((t, i) => {
+    const chip = document.createElement('span');
+    chip.className = `tag-chip ${tagClass(t)}`;
+    chip.innerHTML = `${tagLabel(t)}<button class="chip-del" data-i="${i}">×</button>`;
+    chip.querySelector('.chip-del').addEventListener('click', function() { nmTags.splice(+this.dataset.i, 1); renderTagChips(); });
+    container.appendChild(chip);
+  });
+}
+function addTag(t) {
+  t = t.trim().toLowerCase().replace(/[^a-z0-9+]/g, '');
+  if (!t || nmTags.includes(t)) return;
+  nmTags.push(t);
+  renderTagChips();
+}
+document.querySelectorAll('.tag-preset').forEach(btn =>
+  btn.addEventListener('click', () => addTag(btn.dataset.tag))
+);
+document.getElementById('nm-tag-add-btn').addEventListener('click', () => {
+  const inp = document.getElementById('nm-tag-input');
+  addTag(inp.value); inp.value = '';
+});
+document.getElementById('nm-tag-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); const inp = e.target; addTag(inp.value); inp.value = ''; }
+});
+
+document.getElementById('nm-save').addEventListener('click', () => {
+  const eng  = document.getElementById('nm-eng').value;
+  const gid  = document.getElementById('nm-group').value;
+  const ni   = document.getElementById('nm-nidx').value;
+  const name = document.getElementById('nm-name').value.trim();
+  if (!name) { toast('Tên node không được trống', 'err'); return; }
+  const params = [...document.querySelectorAll('#nm-params-list .param-row-edit')].map(row =>
+    [row.querySelector('.param-key').value.trim(), row.querySelector('.param-val').value.trim()]
+  ).filter(([k]) => k);
+  const cat   = document.getElementById('nm-cat').value.trim();
+  const sc    = document.getElementById('nm-sc').value.trim();
+  const fVal  = document.getElementById('nm-func').value.trim();
+
+  const obj = { n: name, cat, sc, tags: [...nmTags], f: fVal.replace(/<span class="tag [^"]*">[^<]*<\/span>/g,'').trim(), p: params };
+  const g = STORE.engines[eng].find(x => x.id === gid);
+  if (!g) { toast('Không tìm thấy group', 'err'); return; }
+  if (ni !== '') { g.nodes[+ni] = obj; toast(`✅ Cập nhật "${name}"`); }
+  else { g.nodes.push(obj); toast(`✅ Thêm "${name}"`); }
+  document.getElementById('node-modal').classList.remove('open');
+  renderNodes();
+});
+
+function deleteNode(eng, gid, ni) {
+  const g = STORE.engines[eng].find(x => x.id === gid);
+  if (!g) return;
+  const name = g.nodes[ni]?.n || 'node';
+  if (!confirm(`Xóa node "${name}"?`)) return;
+  g.nodes.splice(ni, 1);
+  renderNodes();
+  toast(`🗑 Đã xóa "${name}"`, 'err');
+}
+
+/* ══ TERMS ══ */
+function renderTerms() {
+  const q = document.getElementById('term-search').value.trim().toLowerCase();
+  const tbody = document.getElementById('term-tbody');
+  tbody.innerHTML = '';
+  let count = 0;
+  STORE.terms.forEach((t, i) => {
+    if (q && !t.term.toLowerCase().includes(q) && !t.def.toLowerCase().includes(q) && !t.tag.toLowerCase().includes(q)) return;
+    count++;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="td-name">${t.term}</td>
+      <td><span class="td-badge">${t.tag}</span></td>
+      <td class="td-func">${t.def}</td>
+      <td class="td-actions">
+        <button class="btn-sm edit" data-idx="${i}">✎</button>
+        <button class="btn-sm del"  data-idx="${i}">✕</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('term-count').textContent = `${count} terms`;
+  tbody.querySelectorAll('.btn-sm.edit').forEach(b => b.addEventListener('click', () => openTermModal(+b.dataset.idx)));
+  tbody.querySelectorAll('.btn-sm.del').forEach(b  => b.addEventListener('click', () => deleteTerm(+b.dataset.idx)));
+}
+document.getElementById('term-search').addEventListener('input', renderTerms);
+
+function openTermModal(idx) {
+  document.getElementById('tm-idx').value = idx !== undefined ? idx : '';
+  if (idx !== undefined) {
+    const t = STORE.terms[idx];
+    document.getElementById('term-modal-title').textContent = `Sửa — ${t.term}`;
+    document.getElementById('tm-term').value = t.term;
+    document.getElementById('tm-tag').value  = t.tag;
+    document.getElementById('tm-def').value  = t.def;
+  } else {
+    document.getElementById('term-modal-title').textContent = 'Thêm Term mới';
+    document.getElementById('tm-term').value = '';
+    document.getElementById('tm-tag').value  = '';
+    document.getElementById('tm-def').value  = '';
+  }
+  document.getElementById('term-modal').classList.add('open');
+  document.getElementById('tm-term').focus();
+}
+
+document.getElementById('tm-save').addEventListener('click', () => {
+  const term = document.getElementById('tm-term').value.trim();
+  const tag  = document.getElementById('tm-tag').value.trim();
+  const def  = document.getElementById('tm-def').value.trim();
+  const idx  = document.getElementById('tm-idx').value;
+  if (!term || !def) { toast('Điền đủ Thuật ngữ và Định nghĩa', 'err'); return; }
+  const obj = { term, tag, def };
+  if (idx !== '') { STORE.terms[+idx] = obj; toast(`✅ Cập nhật "${term}"`); }
+  else { STORE.terms.push(obj); toast(`✅ Thêm term "${term}"`); }
+  document.getElementById('term-modal').classList.remove('open');
+  renderTerms();
+});
+
+function deleteTerm(idx) {
+  const name = STORE.terms[idx]?.term || 'term';
+  if (!confirm(`Xóa term "${name}"?`)) return;
+  STORE.terms.splice(idx, 1);
+  renderTerms();
+  toast(`🗑 Đã xóa "${name}"`, 'err');
+}
+
+/* ══ TIPS ══ */
+const ENG_SHORT = { amplify: 'ASE', unity: 'USG', unreal: 'UMG' };
+
+function renderTips() {
+  const type = document.getElementById('tips-type-filter').value;
+  const q    = document.getElementById('tips-search').value.trim().toLowerCase();
+  const tbody = document.getElementById('tips-tbody');
+  tbody.innerHTML = '';
+  let count = 0;
+  STORE.tips.forEach((t, i) => {
+    if (type && t.type !== type) return;
+    if (q && !t.node.toLowerCase().includes(q) && !(t.text||'').toLowerCase().includes(q)) return;
+    count++;
+    const engTags = t.eng.map(e => `<span class="eng-dot ${e}">${ENG_SHORT[e]}</span>`).join('');
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><span class="td-badge ${t.type}">${t.type === 'tip' ? '💡 Tip' : '⚠️ Mistake'}</span></td>
+      <td class="td-name">${t.node}</td>
+      <td class="col-hide"><div class="td-eng-tags">${engTags}</div></td>
+      <td class="td-func col-hide">${t.text || '—'}</td>
+      <td class="td-actions">
+        <button class="btn-sm edit" data-idx="${i}">✎</button>
+        <button class="btn-sm del"  data-idx="${i}">✕</button>
+      </td>`;
+    tbody.appendChild(tr);
+  });
+  document.getElementById('tips-count').textContent = `${count} tips`;
+  tbody.querySelectorAll('.btn-sm.edit').forEach(b => b.addEventListener('click', () => openTipModal(+b.dataset.idx)));
+  tbody.querySelectorAll('.btn-sm.del').forEach(b  => b.addEventListener('click', () => deleteTip(+b.dataset.idx)));
+}
+document.getElementById('tips-type-filter').addEventListener('change', renderTips);
+document.getElementById('tips-search').addEventListener('input', renderTips);
+
+function openTipModal(idx) {
+  document.querySelectorAll('#tipm-engs .eng-check').forEach(label => {
+    label.querySelector('input').checked = false;
+    label.className = 'eng-check';
+  });
+  document.getElementById('tipm-idx').value = idx !== undefined ? idx : '';
+  if (idx !== undefined) {
+    const t = STORE.tips[idx];
+    document.getElementById('tip-modal-title').textContent = `Sửa — ${t.node}`;
+    document.getElementById('tipm-type').value = t.type;
+    document.getElementById('tipm-node').value = t.node;
+    document.getElementById('tipm-text').value = t.text || '';
+    t.eng.forEach(e => {
+      const label = document.querySelector(`#tipm-engs [data-eng="${e}"]`);
+      if (label) { label.querySelector('input').checked = true; label.className = `eng-check checked-${e}`; }
+    });
+  } else {
+    document.getElementById('tip-modal-title').textContent = 'Thêm Tip mới';
+    document.getElementById('tipm-type').value = 'tip';
+    document.getElementById('tipm-node').value = '';
+    document.getElementById('tipm-text').value = '';
+  }
+  document.getElementById('tip-modal').classList.add('open');
+  document.getElementById('tipm-node').focus();
+}
+document.querySelectorAll('#tipm-engs .eng-check').forEach(label => {
+  label.addEventListener('click', () => {
+    const cb = label.querySelector('input');
+    setTimeout(() => { label.className = cb.checked ? `eng-check checked-${label.dataset.eng}` : 'eng-check'; }, 0);
+  });
+});
+
+document.getElementById('tipm-save').addEventListener('click', () => {
+  const type = document.getElementById('tipm-type').value;
+  const node = document.getElementById('tipm-node').value.trim();
+  const text = document.getElementById('tipm-text').value.trim();
+  const idx  = document.getElementById('tipm-idx').value;
+  const engs = [...document.querySelectorAll('#tipm-engs input:checked')].map(c => c.value);
+  if (!node) { toast('Tên node / chủ đề không được trống', 'err'); return; }
+  if (!engs.length) { toast('Chọn ít nhất 1 engine', 'err'); return; }
+  const obj = { type, eng: engs, node, text };
+  if (idx !== '') { STORE.tips[+idx] = obj; toast(`✅ Cập nhật "${node}"`); }
+  else { STORE.tips.push(obj); toast(`✅ Thêm tip "${node}"`); }
+  document.getElementById('tip-modal').classList.remove('open');
+  renderTips();
+});
+
+function deleteTip(idx) {
+  const name = STORE.tips[idx]?.node || 'tip';
+  if (!confirm(`Xóa tip "${name}"?`)) return;
+  STORE.tips.splice(idx, 1);
+  renderTips();
+  toast(`🗑 Đã xóa "${name}"`, 'err');
+}
+
+/* ══ SERIALIZERS ══ */
+function serializeNodes(eng) {
+  const groups = STORE.engines[eng] || [];
+  const lines = ['const DATA_DEFAULT = ['];
+  groups.forEach((g, gi) => {
+    lines.push(`/* ─── ${g.label.toUpperCase()} ─── */`);
+    lines.push(`{id:${JSON.stringify(g.id)},label:${JSON.stringify(g.label)},ico:${JSON.stringify(g.ico)},cls:${JSON.stringify(g.cls)},desc:${JSON.stringify(g.desc||'')},nodes:[`);
+    g.nodes.forEach((n, ni) => {
+      const p = n.p && n.p.length ? JSON.stringify(n.p) : '[]';
+      const tagsVal = (n.tags && n.tags.length) ? JSON.stringify(n.tags) : '[]';
+      lines.push(`{n:${JSON.stringify(n.n)},cat:${JSON.stringify(n.cat||'')},sc:${JSON.stringify(n.sc||'')},tags:${tagsVal},p:${p},f:${JSON.stringify(n.f||'')}}${ni < g.nodes.length-1 ? ',' : ''}`);
+    });
+    lines.push(`]}${gi < groups.length-1 ? ',' : ''}`);
+  });
+  lines.push('];');
+  return lines.join('\n');
+}
+
+function serializeTerms() {
+  return 'window.TERMS = ' + JSON.stringify(STORE.terms, null, 2) + ';';
+}
+
+function serializeTips() {
+  return 'const DATA_TIPS = ' + JSON.stringify(STORE.tips, null, 2) + ';';
+}
+
+function downloadText(content, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type: 'text/javascript' }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+/* ══ EXPORT INDIVIDUAL ══ */
+document.getElementById('btn-export-nodes').addEventListener('click', () => {
+  const eng = document.getElementById('export-eng').value;
+  const map = { amplify: 'node_ase.js', unity: 'node_usg.js', unreal: 'node_umg.js' };
+  downloadText(serializeNodes(eng), map[eng]);
+  toast(`✅ Downloaded ${map[eng]}`);
+});
+document.getElementById('btn-export-terms').addEventListener('click', () => {
+  downloadText(serializeTerms(), 'terms.js');
+  toast('✅ Downloaded terms.js');
+});
+document.getElementById('btn-export-tips').addEventListener('click', () => {
+  downloadText(serializeTips(), 'tips.js');
+  toast('✅ Downloaded tips.js');
+});
+
+/* ══ EXPORT FULL ZIP ══ */
+document.getElementById('btn-export-zip').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-export-zip');
+  btn.textContent = '⏳ Đang đóng gói…';
+  btn.disabled = true;
+
+  try {
+    const zip = new JSZip();
+    const dataFolder = zip.folder('data');
+
+    // Fetch static files from server
+    const staticFiles = [
+      { path: 'index.html',   zip: 'index.html' },
+      { path: 'style.css',    zip: 'style.css' },
+      { path: 'data/config.js', zip: 'config.js' },
+    ];
+    for (const f of staticFiles) {
+      try {
+        const res = await fetch(f.path);
+        const text = await res.text();
+        if (f.zip === 'config.js') dataFolder.file(f.zip, text);
+        else zip.file(f.zip, text);
+      } catch(e) { console.warn('Could not fetch', f.path); }
+    }
+
+    // Add editor itself
+    try {
+      const res = await fetch('editor.html');
+      zip.file('editor.html', await res.text());
+    } catch(e) {}
+
+    // Add data files with current edited content
+    dataFolder.file('node_ase.js', serializeNodes('amplify'));
+    dataFolder.file('node_usg.js', serializeNodes('unity'));
+    dataFolder.file('node_umg.js', serializeNodes('unreal'));
+    dataFolder.file('terms.js', serializeTerms());
+    dataFolder.file('tips.js',  serializeTips());
+
+    const blob = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'nodehub.zip';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('✅ nodehub.zip đã sẵn sàng upload!');
+  } catch(err) {
+    toast('❌ Lỗi: ' + err.message, 'err');
+    console.error(err);
+  } finally {
+    btn.textContent = '⬇ nodehub.zip';
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('btn-upload-project').addEventListener('click', () => {
+  const githubUrl = (window.CONFIG && window.CONFIG.githubUrl) ? window.CONFIG.githubUrl : 'https://github.com/buonber/nodehub';
+  window.open(githubUrl, '_blank');
+});
+</script>
+</body>
+</html>
